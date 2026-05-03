@@ -1,0 +1,50 @@
+name = "ptt-alertor-workers"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# every minute — runs the PTT board sweep
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ptt-alertor"
+database_id = "PUT_YOUR_D1_ID_HERE"
+
+# article events: produced by the cron checker, consumed by the matcher
+[[queues.producers]]
+binding = "ARTICLE_QUEUE"
+queue = "ptt-article-events"
+
+[[queues.consumers]]
+queue = "ptt-article-events"
+max_batch_size = 25
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "ptt-dlq"
+
+# dispatch events: produced by the matcher, consumed by the channel dispatcher
+[[queues.producers]]
+binding = "DISPATCH_QUEUE"
+queue = "ptt-dispatch"
+
+[[queues.consumers]]
+queue = "ptt-dispatch"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "ptt-dlq"
+
+[vars]
+PTT_BASE_URL = "https://www.ptt.cc"
+USER_AGENT = "Mozilla/5.0 (compatible; PttAlertor/2.0; +https://github.com/Ptt-Alertor)"
+
+# Secrets (set with: wrangler secret put <NAME>)
+#   TELEGRAM_BOT_TOKEN
+#   TELEGRAM_WEBHOOK_SECRET
+#   ADMIN_BASIC_AUTH        (base64 of "user:pass")
+#   LINE_CHANNEL_TOKEN      (optional)
+#   MESSENGER_PAGE_TOKEN    (optional)
+#   MAILGUN_API_KEY         (optional)
+#   MAILGUN_DOMAIN          (optional)
