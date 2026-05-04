@@ -1,4 +1,4 @@
--- D1 schema for ptt-alertor-workers
+-- D1 schema for ptt-alertor-worker
 -- Apply with: wrangler d1 migrations apply ptt-alertor --local|--remote
 
 CREATE TABLE IF NOT EXISTS boards (

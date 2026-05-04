@@ -7,7 +7,7 @@ import { webhooks } from './routes/webhooks';
 import { admin } from './routes/admin';
 
 const app = new Hono<{ Bindings: Env }>();
-app.get('/', (c) => c.text('ptt-alertor-workers'));
+app.get('/', (c) => c.text('ptt-alertor'));
 app.route('/webhooks', webhooks);
 app.route('/admin', admin);
 
