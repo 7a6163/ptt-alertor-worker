@@ -22,10 +22,17 @@ export default {
     batch: MessageBatch<ArticleEvent | DispatchEvent>,
     env: Env,
   ): Promise<void> {
-    if (batch.queue === 'ptt-article-events') {
-      await handleArticleBatch(batch as MessageBatch<ArticleEvent>, env);
-    } else if (batch.queue === 'ptt-dispatch') {
-      await handleDispatchBatch(batch as MessageBatch<DispatchEvent>, env);
+    // Cloudflare types `batch.queue` as `string`, so a cast is unavoidable.
+    // Centralising it in a switch with an explicit `default` keeps a new queue
+    // from being silently dropped: it'll throw and exhaust retries to DLQ
+    // instead of being acked as if delivered.
+    switch (batch.queue) {
+      case 'ptt-article-events':
+        return handleArticleBatch(batch as MessageBatch<ArticleEvent>, env);
+      case 'ptt-dispatch':
+        return handleDispatchBatch(batch as MessageBatch<DispatchEvent>, env);
+      default:
+        throw new Error(`ptt-alertor: unhandled queue ${batch.queue}`);
     }
   },
 } satisfies ExportedHandler<Env, ArticleEvent | DispatchEvent>;

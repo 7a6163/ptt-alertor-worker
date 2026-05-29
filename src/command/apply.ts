@@ -1,5 +1,6 @@
 import type { Env, Channel } from '../env';
 import type { Command } from './parser';
+import { MAX_ITEMS_PER_COMMAND } from './parser';
 
 export async function ensureUserAndBinding(
   env: Env,
@@ -33,6 +34,7 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
     case 'list':
       return formatList(env, userId);
     case 'subscribe_keyword':
+      if (cmd.items.length === 0) return '沒有可訂閱的關鍵字。';
       await ensureBoard(env, cmd.board);
       await env.DB.batch(
         cmd.items.map((k) =>
@@ -42,8 +44,9 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
           ).bind(userId, cmd.board, k),
         ),
       );
-      return `已訂閱 ${cmd.board} 關鍵字:${cmd.items.join(', ')}`;
+      return `已訂閱 ${cmd.board} 關鍵字:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
     case 'unsubscribe_keyword':
+      if (cmd.items.length === 0) return '沒有可取消的關鍵字。';
       await env.DB.batch(
         cmd.items.map((k) =>
           env.DB.prepare(
@@ -51,8 +54,9 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
           ).bind(userId, cmd.board, k),
         ),
       );
-      return `已取消 ${cmd.board} 關鍵字:${cmd.items.join(', ')}`;
+      return `已取消 ${cmd.board} 關鍵字:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
     case 'subscribe_author':
+      if (cmd.items.length === 0) return '沒有可訂閱的作者。';
       await ensureBoard(env, cmd.board);
       await env.DB.batch(
         cmd.items.map((a) =>
@@ -62,8 +66,9 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
           ).bind(userId, cmd.board, a),
         ),
       );
-      return `已訂閱 ${cmd.board} 作者:${cmd.items.join(', ')}`;
+      return `已訂閱 ${cmd.board} 作者:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
     case 'unsubscribe_author':
+      if (cmd.items.length === 0) return '沒有可取消的作者。';
       await env.DB.batch(
         cmd.items.map((a) =>
           env.DB.prepare(
@@ -71,10 +76,14 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
           ).bind(userId, cmd.board, a),
         ),
       );
-      return `已取消 ${cmd.board} 作者:${cmd.items.join(', ')}`;
+      return `已取消 ${cmd.board} 作者:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
     case 'unknown':
       return '無法理解的指令。輸入 help 查看用法。';
   }
+}
+
+function truncationNote(truncated: boolean | undefined): string {
+  return truncated ? `（已忽略超過 ${MAX_ITEMS_PER_COMMAND} 個的部分）` : '';
 }
 
 async function ensureBoard(env: Env, name: string): Promise<void> {

@@ -6,6 +6,7 @@
     "lib": ["esnext"],
     "types": ["@cloudflare/workers-types"],
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "isolatedModules": true,
     "resolveJsonModule": true,

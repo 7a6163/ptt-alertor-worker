@@ -1,4 +1,5 @@
 import type { Env, DispatchEvent } from '../env';
+import { PermanentChannelError } from '../errors';
 
 export async function sendTelegram(env: Env, evt: DispatchEvent): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) {
@@ -26,7 +27,14 @@ export async function sendTelegram(env: Env, evt: DispatchEvent): Promise<void> 
       // body wasn't JSON; drop it to avoid leaking the URL/token
     }
     detail = detail.replaceAll(env.TELEGRAM_BOT_TOKEN, '<redacted>');
-    throw new Error(`telegram send ${res.status}${detail ? `: ${detail}` : ''}`);
+    const message = `telegram send ${res.status}${detail ? `: ${detail}` : ''}`;
+    // 429 is rate-limit (transient); other 4xx (400 bad chat_id, 403 bot blocked,
+    // 404 chat not found) won't fix on retry — let the dispatcher ack these instead
+    // of burning the full retry budget before DLQ.
+    if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+      throw new PermanentChannelError(res.status, message);
+    }
+    throw new Error(message);
   }
 }
 

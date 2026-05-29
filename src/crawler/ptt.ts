@@ -28,19 +28,35 @@ export async function fetchBoardIndex(env: Env, board: string): Promise<ScrapedA
 export function parseBoardIndex(baseUrl: string, board: string, html: string): ScrapedArticle[] {
   const out: ScrapedArticle[] = [];
   const reEntry = /<div class="r-ent">([\s\S]*?)<\/div>\s*<\/div>/g;
+  let entries = 0;
+  const misses: Array<{ reason: string; sample: string }> = [];
+  const recordMiss = (reason: string, sample: string) => {
+    if (misses.length < 3) misses.push({ reason, sample: sample.slice(0, 80) });
+  };
 
   for (const match of html.matchAll(reEntry)) {
+    entries++;
     const block = match[1];
-    if (!block) continue;
+    if (!block) {
+      recordMiss('empty-block', '');
+      continue;
+    }
 
     const linkMatch = block.match(/<div class="title">[\s\S]*?<a href="([^"]+)">([\s\S]*?)<\/a>/);
-    if (!linkMatch) continue;
-    const href = linkMatch[1];
-    const title = decodeEntities(linkMatch[2].trim());
+    if (!linkMatch) {
+      // Deleted articles have no <a>; that's an expected miss, not layout drift.
+      recordMiss('no-link', block);
+      continue;
+    }
+    const href = linkMatch[1] ?? '';
+    const title = decodeEntities((linkMatch[2] ?? '').trim());
 
     const idMatch = href.match(/\/([^/]+)\.html$/);
-    if (!idMatch) continue;
-    const id = idMatch[1];
+    if (!idMatch) {
+      recordMiss('no-id', href);
+      continue;
+    }
+    const id = idMatch[1] ?? '';
 
     const authorMatch = block.match(/<div class="author">([^<]*)<\/div>/);
     const author = (authorMatch?.[1] ?? '').trim();
@@ -56,6 +72,16 @@ export function parseBoardIndex(baseUrl: string, board: string, html: string): S
       url: `${baseUrl}${href}`,
       pushCount,
     });
+  }
+
+  // If <r-ent> blocks were found but yielded zero articles, PTT changed its
+  // markup and articles would silently vanish without this signal. One aggregate
+  // warning per call (instead of per-entry) keeps `wrangler tail` legible.
+  const missed = entries - out.length;
+  if (entries > 0 && missed > 0) {
+    console.warn('ptt parser misses', { board, entries, parsed: out.length, missed, misses });
+  } else if (entries === 0) {
+    console.warn('ptt parser no entries', { board, htmlLength: html.length });
   }
   return out;
 }

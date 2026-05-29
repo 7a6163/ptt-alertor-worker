@@ -100,10 +100,12 @@ pnpm typecheck
 
 Found during initial code review. None block local-dev usage; address before serious production traffic.
 
-- **Checker write/enqueue is not atomic** (`src/jobs/checker.ts`). If the Worker is killed between `DB.batch(inserts)` and `ARTICLE_QUEUE.sendBatch`, articles land in D1 but are never matched, and the next cron skips them as known. Fix by enqueuing first or by tracking an `enqueued_at` column to recover unmatched rows.
-- **Admin basic-auth crashes on malformed secret** (`src/routes/admin.ts`). `atob(ADMIN_BASIC_AUTH)` throws if the value isn't valid base64, surfacing as a 500 with an internal error. Wrap in try/catch and return 503.
-- **Command parser has no item cap** (`src/command/parser.ts`). A user sending thousands of comma-separated keywords would trigger thousands of D1 INSERTs in `applyCommand`. Cap items per command (~20) before batching.
-- **Dispatcher retries on permanent failures** (`src/jobs/dispatcher.ts`). All errors `retry({delaySeconds:30})`; a 4xx from Telegram (e.g. user blocked the bot) wastes 5 retries before DLQ. Distinguish: ack on 4xx, retry on 5xx/network.
-- **Queue type cast in entry point** (`src/index.ts`). The `as MessageBatch<…>` cast inside the `queue` handler bypasses TypeScript; if a third queue is added and the `else if` chain misses it, the wrong handler runs silently. Replace with discriminated dispatch + exhaustiveness check.
-- **`noUncheckedIndexedAccess` is off** (`tsconfig.json`). `fresh[0].id` etc. are guarded today but the compiler won't catch future refactors that lose the guard. Turn the flag on and adjust call sites.
-- **HTML parser silently drops malformed entries** (`src/crawler/ptt.ts`). Both `linkMatch` and `idMatch` `continue` on miss; if PTT changes its markup, articles vanish without a signal. Add a counter / `console.warn` for parse failures.
+All initial-review TODOs landed. Fixes:
+
+- ~~**Checker write/enqueue is not atomic**~~ — `src/jobs/checker.ts` + migration `0002_articles_enqueued_at.sql`. Rows insert with `enqueued_at = NULL` and are stamped only after `ARTICLE_QUEUE.sendBatch` resolves; the next sweep recovers any pending row.
+- ~~**Admin basic-auth crashes on malformed secret**~~ — `src/routes/admin.ts`. `atob` wrapped in try/catch; non-base64 or missing `:` returns `503 admin misconfigured`.
+- ~~**Command parser has no item cap**~~ — `src/command/parser.ts` + `src/command/apply.ts`. `MAX_ITEMS_PER_COMMAND = 20`; surplus is dropped and the reply notes it via `（已忽略超過 N 個的部分）`.
+- ~~**Dispatcher retries on permanent failures**~~ — `src/jobs/dispatcher.ts` + `src/errors.ts`. Telegram 4xx (other than 429) throws `PermanentChannelError`; the dispatcher acks those and only retries on 429/5xx/network.
+- ~~**Queue type cast in entry point**~~ — `src/index.ts`. `if/else if` replaced by `switch` with `default: throw` so an unrouted queue surfaces in `wrangler tail` instead of being silently consumed.
+- ~~**`noUncheckedIndexedAccess` is off**~~ — `tsconfig.json`. Flag is on; call sites adjusted (`src/jobs/checker.ts`, `src/command/parser.ts`, `src/crawler/ptt.ts`).
+- ~~**HTML parser silently drops malformed entries**~~ — `src/crawler/ptt.ts`. Aggregate per-call `console.warn` reports miss counts and up to 3 sample snippets when `<r-ent>` blocks were seen but not parsed.

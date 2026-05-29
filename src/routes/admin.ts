@@ -7,9 +7,17 @@ export const admin = new Hono<{ Bindings: Env }>();
 admin.use('*', async (c, next) => {
   const expected = c.env.ADMIN_BASIC_AUTH;
   if (!expected) return c.text('admin disabled', 503);
-  const decoded = atob(expected);
+  // atob throws InvalidCharacterError on non-base64 input. Treat that as a
+  // configuration problem (503), not an internal error (500), so an operator
+  // who pasted the raw "user:pass" instead of base64 sees a useful signal.
+  let decoded: string;
+  try {
+    decoded = atob(expected);
+  } catch {
+    return c.text('admin misconfigured: ADMIN_BASIC_AUTH is not valid base64', 503);
+  }
   const idx = decoded.indexOf(':');
-  if (idx < 0) return c.text('admin misconfigured', 500);
+  if (idx < 0) return c.text('admin misconfigured: expected base64 of "user:pass"', 503);
   const username = decoded.slice(0, idx);
   const password = decoded.slice(idx + 1);
   return basicAuth({ username, password })(c, next);

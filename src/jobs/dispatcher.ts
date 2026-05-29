@@ -3,6 +3,7 @@ import { sendTelegram } from '../channels/telegram';
 import { sendLine } from '../channels/line';
 import { sendMessenger } from '../channels/messenger';
 import { sendMail } from '../channels/mail';
+import { PermanentChannelError } from '../errors';
 
 export async function handleDispatchBatch(
   batch: MessageBatch<DispatchEvent>,
@@ -14,6 +15,18 @@ export async function handleDispatchBatch(
         await dispatch(env, msg.body);
         msg.ack();
       } catch (err) {
+        if (err instanceof PermanentChannelError) {
+          // Channel rejected the message permanently (e.g. user blocked the bot).
+          // Ack so we don't burn the retry budget pushing it to DLQ.
+          console.warn('dispatch permanent failure', {
+            channel: msg.body.channel,
+            userId: msg.body.userId,
+            status: err.status,
+            message: err.message,
+          });
+          msg.ack();
+          return;
+        }
         console.error('dispatch error', err);
         msg.retry({ delaySeconds: 30 });
       }

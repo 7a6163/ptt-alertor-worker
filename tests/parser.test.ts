@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCommand } from '../src/command/parser';
+import { parseCommand, MAX_ITEMS_PER_COMMAND } from '../src/command/parser';
 
 describe('parseCommand', () => {
   it('parses help variants', () => {
@@ -34,5 +34,26 @@ describe('parseCommand', () => {
   it('returns unknown for gibberish', () => {
     expect(parseCommand('asdf').kind).toBe('unknown');
     expect(parseCommand('').kind).toBe('unknown');
+  });
+
+  it('caps items to MAX_ITEMS_PER_COMMAND and flags truncated', () => {
+    const items = Array.from({ length: 25 }, (_, i) => `kw${i}`);
+    const r = parseCommand(`新增 Stock 關鍵字 ${items.join(',')}`);
+    expect(r.kind).toBe('subscribe_keyword');
+    if (r.kind === 'subscribe_keyword') {
+      expect(r.items).toHaveLength(MAX_ITEMS_PER_COMMAND);
+      expect(r.truncated).toBe(true);
+      expect(r.items[0]).toBe('kw0');
+      expect(r.items[MAX_ITEMS_PER_COMMAND - 1]).toBe(`kw${MAX_ITEMS_PER_COMMAND - 1}`);
+    }
+  });
+
+  it('keeps truncated false when within cap', () => {
+    const r = parseCommand('新增 Stock 關鍵字 a,b,c');
+    expect(r.kind).toBe('subscribe_keyword');
+    if (r.kind === 'subscribe_keyword') {
+      expect(r.items).toEqual(['a', 'b', 'c']);
+      expect(r.truncated).toBe(false);
+    }
   });
 });
