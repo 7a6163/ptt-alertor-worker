@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import type { Env } from '../env';
+import { setMyCommands, setWebhook } from '../telegram/api';
 
 export const admin = new Hono<{ Bindings: Env }>();
 
@@ -48,4 +49,24 @@ admin.post('/boards', async (c) => {
 admin.delete('/boards/:name', async (c) => {
   await c.env.DB.prepare(`DELETE FROM boards WHERE name = ?`).bind(c.req.param('name')).run();
   return c.json({ ok: true });
+});
+
+// One-time Telegram wiring: registers the slash-command menu and points the
+// bot's webhook at this Worker (with the secret token, so the webhook stays
+// fail-closed). Re-runnable; safe to call again after a redeploy.
+admin.post('/telegram/setup', async (c) => {
+  const secret = c.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!secret) return c.text('TELEGRAM_WEBHOOK_SECRET not configured', 503);
+
+  const webhookUrl = `${new URL(c.req.url).origin}/webhooks/telegram`;
+  await setMyCommands(c.env, [
+    { command: 'add', description: '訂閱關鍵字（可直接帶 板名 關鍵字）' },
+    { command: 'del', description: '取消關鍵字' },
+    { command: 'addauthor', description: '訂閱作者' },
+    { command: 'delauthor', description: '取消作者' },
+    { command: 'list', description: '顯示目前訂閱' },
+    { command: 'help', description: '顯示用法說明' },
+  ]);
+  await setWebhook(c.env, webhookUrl, secret);
+  return c.json({ ok: true, webhook: webhookUrl });
 });

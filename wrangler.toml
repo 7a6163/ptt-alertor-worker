@@ -2,6 +2,7 @@ name = "ptt-alertor"
 main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
+account_id = "bb0939ef962c26798e65a7ad35baa0ac"
 
 # every minute — runs the PTT board sweep
 [triggers]
@@ -10,7 +11,7 @@ crons = ["* * * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "ptt-alertor"
-database_id = "PUT_YOUR_D1_ID_HERE"
+database_id = "854bc184-761f-4228-9312-f9526153dfbb"
 
 # article events: produced by the cron checker, consumed by the matcher
 [[queues.producers]]

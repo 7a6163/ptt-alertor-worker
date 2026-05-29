@@ -77,6 +77,11 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
         ),
       );
       return `已取消 ${cmd.board} 作者:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
+    case 'guide':
+      // The webhook intercepts `guide` to drive the interactive button/reply
+      // flow; reaching applyCommand means it was invoked outside that path,
+      // so fall back to usage text rather than silently doing nothing.
+      return helpText();
     case 'unknown':
       return '無法理解的指令。輸入 help 查看用法。';
   }
@@ -117,12 +122,18 @@ export async function formatList(env: Env, userId: string): Promise<string> {
 
 export function helpText(): string {
   return [
-    '用法:',
+    '指令（斜線，建議）:',
+    '  /add        - 引導訂閱關鍵字（按鈕選類型）',
+    '  /add <板名> <關鍵字...>      - 直接訂閱關鍵字',
+    '  /del <板名> <關鍵字...>      - 取消關鍵字',
+    '  /addauthor <板名> <ID...>   - 訂閱作者',
+    '  /delauthor <板名> <ID...>   - 取消作者',
+    '  /list       - 顯示目前訂閱',
+    '  /help       - 顯示此說明',
+    '',
+    '或用文字:',
     '  新增 <板名> 關鍵字 <關鍵字1>,<關鍵字2>',
-    '  刪除 <板名> 關鍵字 <關鍵字1>',
-    '  新增 <板名> 作者 <ID1>,<ID2>',
-    '  刪除 <板名> 作者 <ID1>',
-    '  清單   - 顯示目前訂閱',
-    '  help   - 顯示此說明',
+    '  刪除 <板名> 作者 <ID1>,<ID2>',
+    '  清單 / help',
   ].join('\n');
 }
