@@ -28,7 +28,11 @@ export async function fetchBoardIndex(env: Env, board: string): Promise<ScrapedA
 export function parseBoardIndex(baseUrl: string, board: string, html: string): ScrapedArticle[] {
   const out: ScrapedArticle[] = [];
   const reEntry = /<div class="r-ent">([\s\S]*?)<\/div>\s*<\/div>/g;
+  // Deleted posts render the title as "(本文已被刪除) [id]" or
+  // "(本文已被 id 刪除)" with no <a> — expected, not layout drift.
+  const reDeleted = /\((?:本文)?已被[\s\S]*?刪除\)/;
   let entries = 0;
+  let deleted = 0;
   const misses: Array<{ reason: string; sample: string }> = [];
   const recordMiss = (reason: string, sample: string) => {
     if (misses.length < 3) misses.push({ reason, sample: sample.slice(0, 80) });
@@ -44,8 +48,14 @@ export function parseBoardIndex(baseUrl: string, board: string, html: string): S
 
     const linkMatch = block.match(/<div class="title">[\s\S]*?<a href="([^"]+)">([\s\S]*?)<\/a>/);
     if (!linkMatch) {
-      // Deleted articles have no <a>; that's an expected miss, not layout drift.
-      recordMiss('no-link', block);
+      // Deleted posts legitimately have no <a>; count them separately so they
+      // don't inflate `missed` and warn on every crawl. A no-link block that
+      // is NOT a deleted post is real layout drift and still recorded.
+      if (reDeleted.test(block)) {
+        deleted++;
+      } else {
+        recordMiss('no-link', block);
+      }
       continue;
     }
     const href = linkMatch[1] ?? '';
@@ -74,12 +84,21 @@ export function parseBoardIndex(baseUrl: string, board: string, html: string): S
     });
   }
 
-  // If <r-ent> blocks were found but yielded zero articles, PTT changed its
-  // markup and articles would silently vanish without this signal. One aggregate
-  // warning per call (instead of per-entry) keeps `wrangler tail` legible.
-  const missed = entries - out.length;
+  // If <r-ent> blocks were found but yielded neither an article nor a known
+  // deleted-post row, PTT changed its markup and articles would silently vanish
+  // without this signal. Deleted posts are excluded from `missed` so routine
+  // deletions don't warn on every crawl. One aggregate warning per call (instead
+  // of per-entry) keeps `wrangler tail` legible.
+  const missed = entries - out.length - deleted;
   if (entries > 0 && missed > 0) {
-    console.warn('ptt parser misses', { board, entries, parsed: out.length, missed, misses });
+    console.warn('ptt parser misses', {
+      board,
+      entries,
+      parsed: out.length,
+      deleted,
+      missed,
+      misses,
+    });
   } else if (entries === 0) {
     console.warn('ptt parser no entries', { board, htmlLength: html.length });
   }
