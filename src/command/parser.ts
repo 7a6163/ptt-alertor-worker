@@ -11,10 +11,13 @@ export type Command =
   | { kind: 'unsubscribe_keyword'; board: string; items: string[]; truncated?: boolean }
   | { kind: 'subscribe_author'; board: string; items: string[]; truncated?: boolean }
   | { kind: 'unsubscribe_author'; board: string; items: string[]; truncated?: boolean }
-  // Emitted by a bare slash command (`/add`, `/del`, `/addauthor`, ...). The
-  // webhook turns this into an inline-keyboard prompt (target omitted) or a
-  // force_reply prompt (target known) to drive the two-step guided flow.
+  // Emitted by a bare `/add` / `/addauthor`. The webhook turns this into an
+  // inline-keyboard type picker (target omitted) or a force_reply prompt
+  // (target known) to drive the two-step guided subscribe flow.
   | { kind: 'guide'; action: GuideAction; target?: GuideTarget }
+  // Emitted by a bare `/del` / `/delauthor`. The webhook lists the user's
+  // existing subscriptions as tap-to-delete buttons — no typing needed.
+  | { kind: 'remove_menu'; target: GuideTarget }
   | { kind: 'list' }
   | { kind: 'help' }
   | { kind: 'unknown'; raw: string };
@@ -64,7 +67,7 @@ function parseSlash(t: string): Command | null {
     case 'rm':
       return rest
         ? buildSubscribe('unsubscribe_keyword', rest)
-        : { kind: 'guide', action: 'unsubscribe' };
+        : { kind: 'remove_menu', target: 'keyword' };
     case 'addauthor':
       return rest
         ? buildSubscribe('subscribe_author', rest)
@@ -73,7 +76,7 @@ function parseSlash(t: string): Command | null {
     case 'removeauthor':
       return rest
         ? buildSubscribe('unsubscribe_author', rest)
-        : { kind: 'guide', action: 'unsubscribe', target: 'author' };
+        : { kind: 'remove_menu', target: 'author' };
     default:
       return null;
   }
@@ -175,5 +178,23 @@ export function parseGuideCallback(
   return {
     action: m[1] === 'sub' ? 'subscribe' : 'unsubscribe',
     target: m[2] === 'kw' ? 'keyword' : 'author',
+  };
+}
+
+// Tap-to-delete callback for the removal menu. Carries only the table rowid
+// (an integer), so the keyword/author text — however long — never has to fit
+// in the 64-byte callback_data budget.
+export function buildRemoveCallback(target: GuideTarget, rowid: number): string {
+  return `${target === 'keyword' ? 'rk' : 'ra'}:${rowid}`;
+}
+
+export function parseRemoveCallback(
+  data: string,
+): { target: GuideTarget; rowid: number } | null {
+  const m = data.match(/^r(k|a):(\d+)$/);
+  if (!m) return null;
+  return {
+    target: m[1] === 'k' ? 'keyword' : 'author',
+    rowid: Number(m[2]),
   };
 }

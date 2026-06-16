@@ -78,6 +78,20 @@ export async function answerCallbackQuery(
   await callTelegram(env, 'answerCallbackQuery', body);
 }
 
+// Edits an existing message in place — used to re-render the tap-to-delete
+// menu after a removal. Passing replyMarkup omits/replaces the buttons.
+export async function editMessageText(
+  env: Env,
+  chatId: string,
+  messageId: number,
+  text: string,
+  replyMarkup?: ReplyMarkup,
+): Promise<void> {
+  const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text };
+  if (replyMarkup) body.reply_markup = replyMarkup;
+  await callTelegram(env, 'editMessageText', body);
+}
+
 export async function setMyCommands(env: Env, commands: BotCommand[]): Promise<void> {
   await callTelegram(env, 'setMyCommands', { commands });
 }

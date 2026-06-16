@@ -3,15 +3,30 @@ import type { Env } from '../env';
 import {
   parseCommand,
   parseGuideCallback,
+  parseRemoveCallback,
+  buildGuideCallback,
+  buildRemoveCallback,
   detectGuidedMode,
   parseGuidedReply,
-  buildGuideCallback,
   guidePromptTitle,
   type GuideAction,
   type GuideTarget,
 } from '../command/parser';
-import { ensureUserAndBinding, applyCommand } from '../command/apply';
-import { sendMessage, answerCallbackQuery } from '../telegram/api';
+import {
+  ensureUserAndBinding,
+  applyCommand,
+  listKeywordSubs,
+  listAuthorSubs,
+  deleteKeywordSubByRowid,
+  deleteAuthorSubByRowid,
+  type SubRow,
+} from '../command/apply';
+import { sendMessage, answerCallbackQuery, editMessageText } from '../telegram/api';
+import type { InlineButton } from '../telegram/api';
+
+// Telegram caps inline keyboards (~100 buttons); keep the removal menu well
+// under that. A user with more subs than this can delete in waves or by text.
+const REMOVE_MENU_MAX = 50;
 
 interface TelegramMessage {
   chat: { id: number };
@@ -23,7 +38,7 @@ interface TelegramMessage {
 interface TelegramCallbackQuery {
   id: string;
   data?: string;
-  message?: { chat: { id: number } };
+  message?: { chat: { id: number }; message_id: number };
   from: { id: number };
 }
 
@@ -76,14 +91,18 @@ webhooks.post('/telegram', async (c) => {
     await startGuide(c.env, chatId, cmd.action, cmd.target);
     return c.json({ ok: true });
   }
+  if (cmd.kind === 'remove_menu') {
+    await renderRemoveMenu(c.env, chatId, userId, cmd.target);
+    return c.json({ ok: true });
+  }
 
   const reply = await applyCommand(c.env, userId, cmd);
   await sendMessage(c.env, chatId, reply);
   return c.json({ ok: true });
 });
 
-// Guided flow, step 1: a bare slash verb. With no target yet, offer the type
-// as inline buttons; with a target already known (e.g. /addauthor), jump
+// Guided subscribe flow, step 1: a bare /add or /addauthor. With no target yet,
+// offer the type as inline buttons; with a target known (/addauthor), jump
 // straight to the force_reply prompt.
 async function startGuide(
   env: Env,
@@ -123,23 +142,100 @@ async function sendForceReplyPrompt(
   });
 }
 
-async function handleCallback(env: Env, cq: TelegramCallbackQuery): Promise<void> {
-  // Always answer first so the client's loading spinner clears. A stale/expired
-  // callback answers with 400; don't let that fail the webhook (Telegram would
-  // just redeliver the same dead callback) — log and carry on.
+// --- Tap-to-delete removal menu -------------------------------------------
+
+function listSubs(env: Env, userId: string, target: GuideTarget): Promise<SubRow[]> {
+  return target === 'keyword' ? listKeywordSubs(env, userId) : listAuthorSubs(env, userId);
+}
+
+function removeMenuTitle(target: GuideTarget, total: number): string {
+  const word = target === 'keyword' ? '關鍵字' : '作者';
+  const more = total > REMOVE_MENU_MAX ? `（前 ${REMOVE_MENU_MAX} 筆）` : '';
+  return `點選要刪除的${word}：${more}`;
+}
+
+function buildRemoveKeyboard(target: GuideTarget, subs: SubRow[]): InlineButton[][] {
+  return subs.slice(0, REMOVE_MENU_MAX).map((s) => [
+    { text: `${s.board}: ${s.value}`, callback_data: buildRemoveCallback(target, s.rowid) },
+  ]);
+}
+
+// Sends a fresh removal menu in response to a bare /del or /delauthor.
+async function renderRemoveMenu(
+  env: Env,
+  chatId: string,
+  userId: string,
+  target: GuideTarget,
+): Promise<void> {
+  const subs = await listSubs(env, userId, target);
+  if (subs.length === 0) {
+    const word = target === 'keyword' ? '關鍵字' : '作者';
+    await sendMessage(env, chatId, `目前沒有${word}訂閱可刪除。`);
+    return;
+  }
+  await sendMessage(env, chatId, removeMenuTitle(target, subs.length), {
+    replyMarkup: { inline_keyboard: buildRemoveKeyboard(target, subs) },
+  });
+}
+
+// Re-renders the removal menu in place after a delete, dropping the tapped row.
+async function rerenderRemoveMenu(
+  env: Env,
+  chatId: string,
+  messageId: number,
+  userId: string,
+  target: GuideTarget,
+): Promise<void> {
+  const subs = await listSubs(env, userId, target);
+  if (subs.length === 0) {
+    const word = target === 'keyword' ? '關鍵字' : '作者';
+    await editMessageText(env, chatId, messageId, `（已無${word}訂閱）`);
+    return;
+  }
+  await editMessageText(env, chatId, messageId, removeMenuTitle(target, subs.length), {
+    inline_keyboard: buildRemoveKeyboard(target, subs),
+  });
+}
+
+async function answerToast(env: Env, callbackQueryId: string, text?: string): Promise<void> {
+  // Answering clears the client spinner. A stale/expired callback answers with
+  // 400; don't let that fail the webhook (Telegram would redeliver the dead
+  // callback) — log and carry on.
   try {
-    await answerCallbackQuery(env, cq.id);
+    await answerCallbackQuery(env, callbackQueryId, text);
   } catch (err) {
     console.warn('answerCallbackQuery failed', err);
   }
+}
 
-  const data = cq.data;
-  if (!data) return;
-  const parsed = parseGuideCallback(data);
-  if (!parsed) return;
-
+async function handleCallback(env: Env, cq: TelegramCallbackQuery): Promise<void> {
   const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
-  await sendForceReplyPrompt(env, chatId, parsed.action, parsed.target);
+  const data = cq.data;
+
+  // Tap-to-delete from the removal menu.
+  const removal = data ? parseRemoveCallback(data) : null;
+  if (removal) {
+    const userId = await ensureUserAndBinding(env, 'telegram', chatId);
+    const deleted =
+      removal.target === 'keyword'
+        ? await deleteKeywordSubByRowid(env, userId, removal.rowid)
+        : await deleteAuthorSubByRowid(env, userId, removal.rowid);
+    await answerToast(
+      env,
+      cq.id,
+      deleted ? `已取消 ${deleted.board}:${deleted.value}` : '已刪除或不存在',
+    );
+    if (cq.message) {
+      await rerenderRemoveMenu(env, chatId, cq.message.message_id, userId, removal.target);
+    }
+    return;
+  }
+
+  // Guided subscribe type picker.
+  await answerToast(env, cq.id);
+  const guide = data ? parseGuideCallback(data) : null;
+  if (!guide) return;
+  await sendForceReplyPrompt(env, chatId, guide.action, guide.target);
 }
 
 webhooks.post('/line', async (c) => {

@@ -5,6 +5,8 @@ import {
   detectGuidedMode,
   parseGuideCallback,
   buildGuideCallback,
+  parseRemoveCallback,
+  buildRemoveCallback,
   guidePromptTitle,
   MAX_ITEMS_PER_COMMAND,
 } from '../src/command/parser';
@@ -143,12 +145,39 @@ describe('guided two-step flow', () => {
     }
   });
 
-  it('bare /del enters guide for unsubscribe', () => {
+  it('bare /del opens the keyword removal menu', () => {
     const r = parseCommand('/del');
-    expect(r.kind).toBe('guide');
-    if (r.kind === 'guide') {
-      expect(r.action).toBe('unsubscribe');
+    expect(r.kind).toBe('remove_menu');
+    if (r.kind === 'remove_menu') {
+      expect(r.target).toBe('keyword');
     }
+  });
+
+  it('bare /delauthor opens the author removal menu', () => {
+    const r = parseCommand('/delauthor');
+    expect(r.kind).toBe('remove_menu');
+    if (r.kind === 'remove_menu') {
+      expect(r.target).toBe('author');
+    }
+  });
+
+  it('/del with args is still a one-shot keyword unsubscribe', () => {
+    const r = parseCommand('/del Stock 2330');
+    expect(r.kind).toBe('unsubscribe_keyword');
+    if (r.kind === 'unsubscribe_keyword') {
+      expect(r.board).toBe('Stock');
+      expect(r.items).toEqual(['2330']);
+    }
+  });
+
+  it('remove callback_data round-trips and rejects garbage', () => {
+    expect(buildRemoveCallback('keyword', 42)).toBe('rk:42');
+    expect(buildRemoveCallback('author', 7)).toBe('ra:7');
+    expect(parseRemoveCallback('rk:42')).toEqual({ target: 'keyword', rowid: 42 });
+    expect(parseRemoveCallback('ra:7')).toEqual({ target: 'author', rowid: 7 });
+    expect(parseRemoveCallback('rk:')).toBeNull();
+    expect(parseRemoveCallback('g:sub:kw')).toBeNull();
+    expect(parseRemoveCallback('rk:abc')).toBeNull();
   });
 
   it('callback_data round-trips through build/parse', () => {
