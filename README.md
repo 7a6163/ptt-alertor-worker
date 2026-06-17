@@ -64,7 +64,13 @@ pnpm deploy
 
 ## Telegram
 
-After deploying, register the webhook. The `secret_token` is sent back by Telegram on every request as the `X-Telegram-Bot-Api-Secret-Token` header, which the Worker validates (fail-closed if `TELEGRAM_WEBHOOK_SECRET` is not set):
+After deploying, wire up the bot. The one-step way (Basic Auth via `ADMIN_BASIC_AUTH`) registers the slash-command menu **and** sets the webhook with the secret token in a single call:
+
+```
+curl -u <user>:<pass> -X POST https://<your-worker>.workers.dev/admin/telegram/setup
+```
+
+Or set the webhook by hand. The `secret_token` is sent back by Telegram on every request as the `X-Telegram-Bot-Api-Secret-Token` header, which the Worker validates (fail-closed if `TELEGRAM_WEBHOOK_SECRET` is not set):
 
 ```
 curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
@@ -72,15 +78,19 @@ curl "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
   --data-urlencode "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-Talk to your bot:
+Talk to your bot with slash commands:
 
 ```
-新增 Stock 關鍵字 台積電,聯電
-刪除 Stock 關鍵字 聯電
-新增 Gossiping 作者 someuser
-清單
-help
+/add                       guided: pick 關鍵字/作者, then reply "<板名> <項目>"
+/add Stock 台積電,聯電       one-shot keyword subscribe
+/del                       lists your keyword subs as tap-to-delete buttons
+/addauthor Gossiping someuser
+/delauthor                 lists your author subs as tap-to-delete buttons
+/list                      show current subscriptions
+/help                      usage
 ```
+
+The original Chinese free-text grammar still works (`新增 Stock 關鍵字 台積電,聯電`, `刪除 Stock 作者 someuser`, `清單`, `help`).
 
 ## Tests
 
