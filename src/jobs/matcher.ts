@@ -45,7 +45,7 @@ async function findMatches(env: Env, evt: ArticleEvent): Promise<DispatchEvent[]
 
   const titleLower = evt.title.toLowerCase();
   for (const r of kwRows.results) {
-    if (titleLower.includes(r.keyword.toLowerCase())) {
+    if (matchesKeyword(titleLower, r.keyword)) {
       out.push(toDispatch(r, evt, `keyword:${r.keyword}`));
     }
   }
@@ -63,6 +63,15 @@ async function findMatches(env: Env, evt: ArticleEvent): Promise<DispatchEvent[]
   }
 
   return out;
+}
+
+// A keyword may carry space-separated AND terms ("台積電 漲停"): every term must
+// appear in the (already lower-cased) title to count as a match. Multiple
+// keywords on the same board are independent rows, so they act as OR. The
+// common single-term keyword reduces to a plain substring check.
+export function matchesKeyword(titleLower: string, keyword: string): boolean {
+  const terms = keyword.toLowerCase().split(/\s+/).filter(Boolean);
+  return terms.length > 0 && terms.every((term) => titleLower.includes(term));
 }
 
 function toDispatch(r: BindingRow, evt: ArticleEvent, reason: string): DispatchEvent {

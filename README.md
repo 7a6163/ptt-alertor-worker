@@ -90,6 +90,21 @@ Talk to your bot with slash commands:
 /help                      usage
 ```
 
+### Keyword logic — comma is OR, space is AND
+
+A keyword match is a case-insensitive substring of the article title. Two operators combine them:
+
+- **Comma `,` = OR** — separate keywords; the article notifies if it matches any one.
+- **Space ` ` = AND** — within a single keyword, every space-separated term must appear in the title (order/adjacency don't matter).
+
+```
+/add Stock 台積電,聯電        台積電 OR 聯電
+/add Stock 台積電 漲停        台積電 AND 漲停 (both must be in the title)
+/add Stock 台積電 漲停,聯電 跌停   (台積電 AND 漲停) OR (聯電 AND 跌停)
+```
+
+Authors are exact IDs, so spaces there just separate multiple IDs (no AND).
+
 The original Chinese free-text grammar still works (`新增 Stock 關鍵字 台積電,聯電`, `刪除 Stock 作者 someuser`, `清單`, `help`).
 
 ## Tests

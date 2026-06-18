@@ -91,9 +91,10 @@ function parseTextGrammar(t: string, raw: string): Command {
   const verb = m[1] ?? '';
   const board = m[2] ?? '';
   const kindWord = m[3] ?? '';
-  const { items, truncated } = capItems(splitTokens(m[4] ?? ''));
   const isAuthor = /author|作者/i.test(kindWord);
   const isAdd = verb === '新增';
+  const rawItems = isAuthor ? splitTokens(m[4] ?? '') : splitKeywordItems(m[4] ?? '');
+  const { items, truncated } = capItems(rawItems);
 
   if (isAuthor && isAdd) return { kind: 'subscribe_author', board, items, truncated };
   if (isAuthor) return { kind: 'unsubscribe_author', board, items, truncated };
@@ -101,17 +102,43 @@ function parseTextGrammar(t: string, raw: string): Command {
   return { kind: 'unsubscribe_keyword', board, items, truncated };
 }
 
-// "<board> <item> <item>..." → a subscribe/unsubscribe command. Shared by the
-// slash one-shot path and the guided reply path.
+// "<board> <items...>" → a subscribe/unsubscribe command. Shared by the slash
+// one-shot path and the guided reply path. The board is the first whitespace-
+// delimited token; everything after is the item list, split per `splitItems`.
 function buildSubscribe(kind: SubscribeKind, rest: string): Command {
-  const tokens = splitTokens(rest);
-  const board = tokens[0] ?? '';
-  const { items, truncated } = capItems(tokens.slice(1));
+  const { board, itemsPart } = splitBoard(rest);
+  const { items, truncated } = capItems(splitItems(kind, itemsPart));
   return { kind, board, items, truncated };
+}
+
+// Peel the leading board token off the rest of the command.
+function splitBoard(rest: string): { board: string; itemsPart: string } {
+  const m = rest.trim().match(/^(\S+)\s*([\s\S]*)$/);
+  if (!m) return { board: '', itemsPart: '' };
+  return { board: m[1] ?? '', itemsPart: (m[2] ?? '').trim() };
+}
+
+// Keywords and authors split differently:
+//   - Authors are exact IDs (no spaces), so comma OR whitespace separates them.
+//   - Keywords use comma as OR but PRESERVE intra-item whitespace as an AND
+//     operator (matcher requires every space-separated term in the title), so
+//     they split on commas only — see splitKeywordItems.
+function splitItems(kind: SubscribeKind, s: string): string[] {
+  const isKeyword = kind === 'subscribe_keyword' || kind === 'unsubscribe_keyword';
+  return isKeyword ? splitKeywordItems(s) : splitTokens(s);
 }
 
 function splitTokens(s: string): string[] {
   return s.split(/[,，\s]+/).map((tok) => tok.trim()).filter(Boolean);
+}
+
+// Comma-separated keyword groups (OR); within a group, runs of whitespace are
+// normalised to a single space and kept as AND terms ("台積電  漲停" → "台積電 漲停").
+function splitKeywordItems(s: string): string[] {
+  return s
+    .split(/[,，]+/)
+    .map((group) => group.trim().split(/\s+/).filter(Boolean).join(' '))
+    .filter(Boolean);
 }
 
 function capItems(all: string[]): { items: string[]; truncated: boolean } {

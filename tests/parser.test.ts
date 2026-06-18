@@ -78,11 +78,37 @@ describe('slash commands', () => {
     }
   });
 
-  it('parses /add with space-separated items', () => {
-    const r = parseCommand('/add Stock 台積電 聯電');
+  it('treats space inside a keyword as a single AND term', () => {
+    const r = parseCommand('/add Stock 台積電 漲停');
     expect(r.kind).toBe('subscribe_keyword');
     if (r.kind === 'subscribe_keyword') {
-      expect(r.items).toEqual(['台積電', '聯電']);
+      expect(r.board).toBe('Stock');
+      expect(r.items).toEqual(['台積電 漲停']);
+    }
+  });
+
+  it('uses comma as OR and space as AND together', () => {
+    const r = parseCommand('/add Stock 台積電 漲停,聯電 跌停');
+    expect(r.kind).toBe('subscribe_keyword');
+    if (r.kind === 'subscribe_keyword') {
+      expect(r.items).toEqual(['台積電 漲停', '聯電 跌停']);
+    }
+  });
+
+  it('normalises extra whitespace within an AND keyword', () => {
+    const r = parseCommand('/add Stock 台積電    漲停');
+    expect(r.kind).toBe('subscribe_keyword');
+    if (r.kind === 'subscribe_keyword') {
+      expect(r.items).toEqual(['台積電 漲停']);
+    }
+  });
+
+  it('still splits authors on whitespace (no AND semantics)', () => {
+    const r = parseCommand('/addauthor Gossiping userA userB');
+    expect(r.kind).toBe('subscribe_author');
+    if (r.kind === 'subscribe_author') {
+      expect(r.board).toBe('Gossiping');
+      expect(r.items).toEqual(['userA', 'userB']);
     }
   });
 
@@ -199,7 +225,7 @@ describe('guided two-step flow', () => {
   });
 
   it('parses the guided reply into the matching command', () => {
-    const r = parseGuidedReply('subscribe', 'keyword', 'Stock 台積電 聯電');
+    const r = parseGuidedReply('subscribe', 'keyword', 'Stock 台積電,聯電');
     expect(r.kind).toBe('subscribe_keyword');
     if (r.kind === 'subscribe_keyword') {
       expect(r.board).toBe('Stock');
