@@ -157,7 +157,6 @@ describe('guided two-step flow', () => {
     const r = parseCommand('/add');
     expect(r.kind).toBe('guide');
     if (r.kind === 'guide') {
-      expect(r.action).toBe('subscribe');
       expect(r.target).toBeUndefined();
     }
   });
@@ -166,7 +165,6 @@ describe('guided two-step flow', () => {
     const r = parseCommand('/addauthor');
     expect(r.kind).toBe('guide');
     if (r.kind === 'guide') {
-      expect(r.action).toBe('subscribe');
       expect(r.target).toBe('author');
     }
   });
@@ -207,25 +205,23 @@ describe('guided two-step flow', () => {
   });
 
   it('callback_data round-trips through build/parse', () => {
-    const data = buildGuideCallback('subscribe', 'author');
+    const data = buildGuideCallback('author');
     expect(data).toBe('g:sub:au');
-    expect(parseGuideCallback(data)).toEqual({ action: 'subscribe', target: 'author' });
-    expect(parseGuideCallback('g:unsub:kw')).toEqual({
-      action: 'unsubscribe',
-      target: 'keyword',
-    });
+    expect(parseGuideCallback(data)).toBe('author');
+    expect(parseGuideCallback('g:sub:kw')).toBe('keyword');
+    expect(parseGuideCallback('g:unsub:kw')).toBeNull();
     expect(parseGuideCallback('garbage')).toBeNull();
   });
 
   it('detects guided mode from the force_reply prompt title', () => {
-    const title = guidePromptTitle('subscribe', 'keyword');
+    const title = guidePromptTitle('keyword');
     const prompt = `${title}\n回覆此訊息並輸入：<板名> <關鍵字>`;
-    expect(detectGuidedMode(prompt)).toEqual({ action: 'subscribe', target: 'keyword' });
+    expect(detectGuidedMode(prompt)).toBe('keyword');
     expect(detectGuidedMode('一般訊息沒有標題')).toBeNull();
   });
 
   it('parses the guided reply into the matching command', () => {
-    const r = parseGuidedReply('subscribe', 'keyword', 'Stock 台積電,聯電');
+    const r = parseGuidedReply('keyword', 'Stock 台積電,聯電');
     expect(r.kind).toBe('subscribe_keyword');
     if (r.kind === 'subscribe_keyword') {
       expect(r.board).toBe('Stock');

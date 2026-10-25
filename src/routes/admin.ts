@@ -47,7 +47,13 @@ admin.post('/boards', async (c) => {
 });
 
 admin.delete('/boards/:name', async (c) => {
-  await c.env.DB.prepare(`DELETE FROM boards WHERE name = ?`).bind(c.req.param('name')).run();
+  const name = c.req.param('name');
+  await c.env.DB.batch([
+    c.env.DB.prepare(`DELETE FROM keyword_subs WHERE board = ?`).bind(name),
+    c.env.DB.prepare(`DELETE FROM author_subs WHERE board = ?`).bind(name),
+    c.env.DB.prepare(`DELETE FROM articles WHERE board = ?`).bind(name),
+    c.env.DB.prepare(`DELETE FROM boards WHERE name = ?`).bind(name),
+  ]);
   return c.json({ ok: true });
 });
 

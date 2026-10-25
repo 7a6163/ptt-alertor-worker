@@ -44,5 +44,8 @@ async function dispatch(env: Env, evt: DispatchEvent): Promise<void> {
       return sendMessenger(env, evt);
     case 'mail':
       return sendMail(env, evt);
+    default:
+      // Don't ack an unknown channel as delivered; let it retry into the DLQ.
+      throw new Error(`dispatch: unknown channel ${String(evt.channel)}`);
   }
 }

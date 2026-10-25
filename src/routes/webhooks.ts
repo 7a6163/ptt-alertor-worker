@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { timingSafeEqual } from 'hono/utils/buffer';
 import type { Env } from '../env';
 import {
   parseCommand,
@@ -9,7 +10,6 @@ import {
   detectGuidedMode,
   parseGuidedReply,
   guidePromptTitle,
-  type GuideAction,
   type GuideTarget,
 } from '../command/parser';
 import {
@@ -32,7 +32,7 @@ interface TelegramMessage {
   chat: { id: number };
   text?: string;
   from?: { id: number; username?: string };
-  reply_to_message?: { text?: string };
+  reply_to_message?: { text?: string; from?: { is_bot?: boolean } };
 }
 
 interface TelegramCallbackQuery {
@@ -56,84 +56,77 @@ webhooks.post('/telegram', async (c) => {
   if (!expected) {
     return c.text('webhook not configured', 503);
   }
-  const got = c.req.header('X-Telegram-Bot-Api-Secret-Token');
-  if (got !== expected) {
+  const got = c.req.header('X-Telegram-Bot-Api-Secret-Token') ?? '';
+  if (!(await timingSafeEqual(got, expected))) {
     return c.text('forbidden', 403);
   }
 
   const update = await c.req.json<TelegramUpdate>();
+  // Always 200 once authenticated: on a non-2xx Telegram redelivers the same
+  // update (and stalls the ones behind it), and our failures are not the kind
+  // a replay fixes (user blocked the bot, "message is not modified", ...).
+  try {
+    await handleUpdate(c.env, update);
+  } catch (err) {
+    console.error('telegram webhook error', err);
+  }
+  return c.json({ ok: true });
+});
 
+async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
-    await handleCallback(c.env, update.callback_query);
-    return c.json({ ok: true });
+    return handleCallback(env, update.callback_query);
   }
 
   const msg = update.message;
-  if (!msg?.text) return c.json({ ok: true });
+  if (!msg?.text) return;
 
   const chatId = String(msg.chat.id);
-  const userId = await ensureUserAndBinding(c.env, 'telegram', chatId);
+  const userId = await ensureUserAndBinding(env, 'telegram', chatId);
 
   // Guided two-step flow, step 2: the user replied to one of our force_reply
-  // prompts. The mode (subscribe/unsubscribe × keyword/author) is recovered
-  // from the prompt text — no server-side conversation state.
-  const promptText = msg.reply_to_message?.text;
-  const mode = promptText ? detectGuidedMode(promptText) : null;
-  if (mode) {
-    const cmd = parseGuidedReply(mode.action, mode.target, msg.text);
-    const reply = await applyCommand(c.env, userId, cmd);
-    await sendMessage(c.env, chatId, reply);
-    return c.json({ ok: true });
+  // prompts. The target (keyword/author) is recovered from the prompt text —
+  // no server-side conversation state. Only replies to the bot count, so a
+  // group member quoting a prompt-like message doesn't trigger it.
+  const prompt = msg.reply_to_message;
+  const target = prompt?.from?.is_bot && prompt.text ? detectGuidedMode(prompt.text) : null;
+  if (target) {
+    const cmd = parseGuidedReply(target, msg.text);
+    return sendMessage(env, chatId, await applyCommand(env, userId, cmd));
   }
 
   const cmd = parseCommand(msg.text);
-  if (cmd.kind === 'guide') {
-    await startGuide(c.env, chatId, cmd.action, cmd.target);
-    return c.json({ ok: true });
-  }
-  if (cmd.kind === 'remove_menu') {
-    await renderRemoveMenu(c.env, chatId, userId, cmd.target);
-    return c.json({ ok: true });
-  }
-
-  const reply = await applyCommand(c.env, userId, cmd);
-  await sendMessage(c.env, chatId, reply);
-  return c.json({ ok: true });
-});
+  if (cmd.kind === 'guide') return startGuide(env, chatId, cmd.target);
+  if (cmd.kind === 'remove_menu') return renderRemoveMenu(env, chatId, userId, cmd.target);
+  return sendMessage(env, chatId, await applyCommand(env, userId, cmd));
+}
 
 // Guided subscribe flow, step 1: a bare /add or /addauthor. With no target yet,
 // offer the type as inline buttons; with a target known (/addauthor), jump
 // straight to the force_reply prompt.
-async function startGuide(
-  env: Env,
-  chatId: string,
-  action: GuideAction,
-  target?: GuideTarget,
-): Promise<void> {
+async function startGuide(env: Env, chatId: string, target?: GuideTarget): Promise<void> {
   if (!target) {
-    const verb = action === 'subscribe' ? '訂閱' : '取消訂閱';
-    await sendMessage(env, chatId, `要${verb}什麼？`, {
+    await sendMessage(env, chatId, '要訂閱什麼？', {
       replyMarkup: {
         inline_keyboard: [
           [
-            { text: '關鍵字', callback_data: buildGuideCallback(action, 'keyword') },
-            { text: '作者', callback_data: buildGuideCallback(action, 'author') },
+            { text: '關鍵字', callback_data: buildGuideCallback('keyword') },
+            { text: '作者', callback_data: buildGuideCallback('author') },
           ],
         ],
       },
     });
     return;
   }
-  await sendForceReplyPrompt(env, chatId, action, target);
+  await sendForceReplyPrompt(env, chatId, target);
 }
 
 async function sendForceReplyPrompt(
   env: Env,
   chatId: string,
-  action: GuideAction,
   target: GuideTarget,
 ): Promise<void> {
-  const title = guidePromptTitle(action, target);
+  const title = guidePromptTitle(target);
   const itemWord = target === 'keyword' ? '關鍵字' : '作者 ID';
   const example = target === 'keyword' ? 'Stock 台積電' : 'Stock someuser';
   const text = `${title}\n回覆此訊息並輸入：<板名> <${itemWord}>\n例如：${example}`;
@@ -220,22 +213,22 @@ async function handleCallback(env: Env, cq: TelegramCallbackQuery): Promise<void
       removal.target === 'keyword'
         ? await deleteKeywordSubByRowid(env, userId, removal.rowid)
         : await deleteAuthorSubByRowid(env, userId, removal.rowid);
-    await answerToast(
-      env,
-      cq.id,
-      deleted ? `已取消 ${deleted.board}:${deleted.value}` : '已刪除或不存在',
-    );
-    if (cq.message) {
-      await rerenderRemoveMenu(env, chatId, cq.message.message_id, userId, removal.target);
-    }
+    // Nothing deleted (double tap, stale menu) → the menu is already current;
+    // re-rendering identical content would get a 400 from Telegram.
+    await Promise.all([
+      answerToast(env, cq.id, deleted ? `已取消 ${deleted.board}:${deleted.value}` : '已刪除或不存在'),
+      deleted && cq.message
+        ? rerenderRemoveMenu(env, chatId, cq.message.message_id, userId, removal.target)
+        : undefined,
+    ]);
     return;
   }
 
   // Guided subscribe type picker.
   await answerToast(env, cq.id);
-  const guide = data ? parseGuideCallback(data) : null;
-  if (!guide) return;
-  await sendForceReplyPrompt(env, chatId, guide.action, guide.target);
+  const target = data ? parseGuideCallback(data) : null;
+  if (!target) return;
+  await sendForceReplyPrompt(env, chatId, target);
 }
 
 webhooks.post('/line', async (c) => {

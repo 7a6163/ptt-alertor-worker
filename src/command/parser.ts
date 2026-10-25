@@ -3,7 +3,6 @@
 // applyCommand batch — both a webhook latency hazard and a D1 quota risk.
 export const MAX_ITEMS_PER_COMMAND = 20;
 
-export type GuideAction = 'subscribe' | 'unsubscribe';
 export type GuideTarget = 'keyword' | 'author';
 
 export type Command =
@@ -14,7 +13,7 @@ export type Command =
   // Emitted by a bare `/add` / `/addauthor`. The webhook turns this into an
   // inline-keyboard type picker (target omitted) or a force_reply prompt
   // (target known) to drive the two-step guided subscribe flow.
-  | { kind: 'guide'; action: GuideAction; target?: GuideTarget }
+  | { kind: 'guide'; target?: GuideTarget }
   // Emitted by a bare `/del` / `/delauthor`. The webhook lists the user's
   // existing subscriptions as tap-to-delete buttons — no typing needed.
   | { kind: 'remove_menu'; target: GuideTarget }
@@ -61,7 +60,7 @@ function parseSlash(t: string): Command | null {
     case 'add':
       return rest
         ? buildSubscribe('subscribe_keyword', rest)
-        : { kind: 'guide', action: 'subscribe' };
+        : { kind: 'guide' };
     case 'del':
     case 'remove':
     case 'rm':
@@ -71,7 +70,7 @@ function parseSlash(t: string): Command | null {
     case 'addauthor':
       return rest
         ? buildSubscribe('subscribe_author', rest)
-        : { kind: 'guide', action: 'subscribe', target: 'author' };
+        : { kind: 'guide', target: 'author' };
     case 'delauthor':
     case 'removeauthor':
       return rest
@@ -150,62 +149,38 @@ function capItems(all: string[]): { items: string[]; truncated: boolean } {
 
 // --- Guided two-step flow helpers (stateless) -----------------------------
 // State is carried in the force_reply prompt text and the inline-keyboard
-// callback_data, so no conversation table is needed.
-
-function guideKind(action: GuideAction, target: GuideTarget): SubscribeKind {
-  if (action === 'subscribe') {
-    return target === 'keyword' ? 'subscribe_keyword' : 'subscribe_author';
-  }
-  return target === 'keyword' ? 'unsubscribe_keyword' : 'unsubscribe_author';
-}
+// callback_data, so no conversation table is needed. Only subscribe is guided;
+// unsubscribe goes through the tap-to-delete menu.
 
 // Title line embedded in the force_reply prompt. detectGuidedMode() reads it
 // back from reply_to_message.text to recover which flow the reply belongs to.
-export function guidePromptTitle(action: GuideAction, target: GuideTarget): string {
-  const verb = action === 'subscribe' ? '新增' : '刪除';
-  const what = target === 'keyword' ? '關鍵字' : '作者';
-  return `${verb}${what}訂閱`;
+export function guidePromptTitle(target: GuideTarget): string {
+  return `新增${target === 'keyword' ? '關鍵字' : '作者'}訂閱`;
 }
 
-const GUIDE_COMBOS: ReadonlyArray<readonly [GuideAction, GuideTarget]> = [
-  ['subscribe', 'keyword'],
-  ['subscribe', 'author'],
-  ['unsubscribe', 'keyword'],
-  ['unsubscribe', 'author'],
-];
-
-export function detectGuidedMode(
-  promptText: string,
-): { action: GuideAction; target: GuideTarget } | null {
-  for (const [action, target] of GUIDE_COMBOS) {
-    if (promptText.includes(guidePromptTitle(action, target))) return { action, target };
+export function detectGuidedMode(promptText: string): GuideTarget | null {
+  for (const target of ['keyword', 'author'] as const) {
+    if (promptText.includes(guidePromptTitle(target))) return target;
   }
   return null;
 }
 
 // Second step of the guided flow: the user's "<board> <item>..." reply.
-export function parseGuidedReply(
-  action: GuideAction,
-  target: GuideTarget,
-  replyText: string,
-): Command {
-  return buildSubscribe(guideKind(action, target), replyText.trim());
+export function parseGuidedReply(target: GuideTarget, replyText: string): Command {
+  const kind = target === 'keyword' ? 'subscribe_keyword' : 'subscribe_author';
+  return buildSubscribe(kind, replyText.trim());
 }
 
-// callback_data is capped at 64 bytes by Telegram, so keep it terse.
-export function buildGuideCallback(action: GuideAction, target: GuideTarget): string {
-  return `g:${action === 'subscribe' ? 'sub' : 'unsub'}:${target === 'keyword' ? 'kw' : 'au'}`;
+// callback_data is capped at 64 bytes by Telegram, so keep it terse. The
+// `sub` segment is kept so buttons on already-sent menus still parse.
+export function buildGuideCallback(target: GuideTarget): string {
+  return `g:sub:${target === 'keyword' ? 'kw' : 'au'}`;
 }
 
-export function parseGuideCallback(
-  data: string,
-): { action: GuideAction; target: GuideTarget } | null {
-  const m = data.match(/^g:(sub|unsub):(kw|au)$/);
+export function parseGuideCallback(data: string): GuideTarget | null {
+  const m = data.match(/^g:sub:(kw|au)$/);
   if (!m) return null;
-  return {
-    action: m[1] === 'sub' ? 'subscribe' : 'unsubscribe',
-    target: m[2] === 'kw' ? 'keyword' : 'author',
-  };
+  return m[1] === 'kw' ? 'keyword' : 'author';
 }
 
 // Tap-to-delete callback for the removal menu. Carries only the table rowid

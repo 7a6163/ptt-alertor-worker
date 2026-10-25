@@ -6,13 +6,26 @@ interface BindingRow {
   external_id: string;
 }
 
+export interface BoardSubs {
+  keywords: (BindingRow & { keyword: string })[];
+  authors: (BindingRow & { author: string })[];
+}
+
 export async function handleArticleBatch(
   batch: MessageBatch<ArticleEvent>,
   env: Env,
 ): Promise<void> {
+  // A batch is almost always one board, so load its subs once, not per message.
+  const subsByBoard = new Map<string, Promise<BoardSubs>>();
   for (const msg of batch.messages) {
     try {
-      const matches = await findMatches(env, msg.body);
+      const { board } = msg.body;
+      let subs = subsByBoard.get(board);
+      if (!subs) {
+        subs = loadSubs(env, board);
+        subsByBoard.set(board, subs);
+      }
+      const matches = findMatches(await subs, msg.body);
       // Enqueue first; ack only after the downstream queue accepted the matches.
       // Otherwise a failed sendBatch silently drops notifications.
       for (let i = 0; i < matches.length; i += 100) {
@@ -32,36 +45,46 @@ export async function handleArticleBatch(
   }
 }
 
-async function findMatches(env: Env, evt: ArticleEvent): Promise<DispatchEvent[]> {
-  const out: DispatchEvent[] = [];
+async function loadSubs(env: Env, board: string): Promise<BoardSubs> {
+  const [kw, au] = await Promise.all([
+    env.DB.prepare(
+      `SELECT ks.user_id, ks.keyword, cb.channel, cb.external_id
+       FROM keyword_subs ks
+       JOIN channel_bindings cb ON cb.user_id = ks.user_id
+       JOIN users u ON u.id = ks.user_id
+       WHERE ks.board = ? AND u.enabled = 1`,
+    ).bind(board).all<BindingRow & { keyword: string }>(),
+    env.DB.prepare(
+      `SELECT a.user_id, a.author, cb.channel, cb.external_id
+       FROM author_subs a
+       JOIN channel_bindings cb ON cb.user_id = a.user_id
+       JOIN users u ON u.id = a.user_id
+       WHERE a.board = ? AND u.enabled = 1`,
+    ).bind(board).all<BindingRow & { author: string }>(),
+  ]);
+  return { keywords: kw.results, authors: au.results };
+}
 
-  const kwRows = await env.DB.prepare(
-    `SELECT ks.user_id, ks.keyword, cb.channel, cb.external_id
-     FROM keyword_subs ks
-     JOIN channel_bindings cb ON cb.user_id = ks.user_id
-     JOIN users u ON u.id = ks.user_id
-     WHERE ks.board = ? AND u.enabled = 1`,
-  ).bind(evt.board).all<BindingRow & { keyword: string }>();
+// One notification per (user, channel) per article, however many of their
+// subs matched. Keywords are checked first, so the reason names the first
+// keyword hit; author matches only fill in for users with no keyword hit.
+export function findMatches(subs: BoardSubs, evt: ArticleEvent): DispatchEvent[] {
+  const out: DispatchEvent[] = [];
+  const seen = new Set<string>();
+  const add = (r: BindingRow, reason: string): void => {
+    const key = `${r.user_id}:${r.channel}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(toDispatch(r, evt, reason));
+  };
 
   const titleLower = evt.title.toLowerCase();
-  for (const r of kwRows.results) {
-    if (matchesKeyword(titleLower, r.keyword)) {
-      out.push(toDispatch(r, evt, `keyword:${r.keyword}`));
-    }
+  for (const r of subs.keywords) {
+    if (matchesKeyword(titleLower, r.keyword)) add(r, `keyword:${r.keyword}`);
   }
-
-  const auRows = await env.DB.prepare(
-    `SELECT a.user_id, cb.channel, cb.external_id
-     FROM author_subs a
-     JOIN channel_bindings cb ON cb.user_id = a.user_id
-     JOIN users u ON u.id = a.user_id
-     WHERE a.board = ? AND a.author = ? AND u.enabled = 1`,
-  ).bind(evt.board, evt.author).all<BindingRow>();
-
-  for (const r of auRows.results) {
-    out.push(toDispatch(r, evt, `author:${evt.author}`));
+  for (const r of subs.authors) {
+    if (r.author === evt.author) add(r, `author:${evt.author}`);
   }
-
   return out;
 }
 

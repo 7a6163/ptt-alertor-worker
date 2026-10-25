@@ -2,6 +2,13 @@ import type { Env, Channel } from '../env';
 import type { Command } from './parser';
 import { MAX_ITEMS_PER_COMMAND } from './parser';
 
+// PTT board names are ASCII; anything else (a stray `/add`, Chinese text) would
+// become a boards row the checker fetches every minute forever.
+// shortcut: case and existence are not checked, so `stock` silently never
+// matches; verify against PTT when junk boards show up in /admin/boards.
+const BOARD_NAME_RE = /^[A-Za-z0-9_-]{1,30}$/;
+const BAD_BOARD_MSG = '板名格式不正確（英數、底線、連字號）。';
+
 export async function ensureUserAndBinding(
   env: Env,
   channel: Channel,
@@ -35,6 +42,7 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
       return formatList(env, userId);
     case 'subscribe_keyword':
       if (cmd.items.length === 0) return '沒有可訂閱的關鍵字。';
+      if (!BOARD_NAME_RE.test(cmd.board)) return BAD_BOARD_MSG;
       await ensureBoard(env, cmd.board);
       await env.DB.batch(
         cmd.items.map((k) =>
@@ -57,6 +65,7 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
       return `已取消 ${cmd.board} 關鍵字:${cmd.items.join(', ')}${truncationNote(cmd.truncated)}`;
     case 'subscribe_author':
       if (cmd.items.length === 0) return '沒有可訂閱的作者。';
+      if (!BOARD_NAME_RE.test(cmd.board)) return BAD_BOARD_MSG;
       await ensureBoard(env, cmd.board);
       await env.DB.batch(
         cmd.items.map((a) =>

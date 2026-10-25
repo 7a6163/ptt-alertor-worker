@@ -11,8 +11,8 @@ export async function sendTelegram(env: Env, evt: DispatchEvent): Promise<void> 
 function formatMessage(evt: DispatchEvent): string {
   const { payload } = evt;
   const reason = payload.matchReason.startsWith('keyword:')
-    ? `關鍵字「${payload.matchReason.slice(8)}」`
-    : `作者「${payload.matchReason.slice(7)}」`;
+    ? `關鍵字「${esc(payload.matchReason.slice(8))}」`
+    : `作者「${esc(payload.matchReason.slice(7))}」`;
   return `<b>[${esc(payload.board)}]</b> ${reason}\n${esc(payload.title)}\n— ${esc(payload.author)}\n${payload.url}`;
 }
 
