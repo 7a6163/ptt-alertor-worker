@@ -9,7 +9,7 @@ export interface ScrapedArticle {
   pushCount: number;
 }
 
-export async function fetchBoardIndex(env: Env, board: string): Promise<ScrapedArticle[]> {
+async function fetchBoardHtml(env: Env, board: string): Promise<string> {
   const url = `${env.PTT_BASE_URL}/bbs/${encodeURIComponent(board)}/index.html`;
   const res = await fetch(url, {
     headers: {
@@ -21,8 +21,21 @@ export async function fetchBoardIndex(env: Env, board: string): Promise<ScrapedA
   if (!res.ok) {
     throw new Error(`PTT fetch ${board} failed: ${res.status}`);
   }
-  const html = await res.text();
-  return parseBoardIndex(env.PTT_BASE_URL, board, html);
+  return res.text();
+}
+
+export async function fetchBoardIndex(env: Env, board: string): Promise<ScrapedArticle[]> {
+  return parseBoardIndex(env.PTT_BASE_URL, board, await fetchBoardHtml(env, board));
+}
+
+// PTT serves /bbs/stock/ and /bbs/Stock/ alike; the topbar link carries the
+// canonical spelling, which is what we must store so article ids line up.
+export async function fetchBoardName(env: Env, board: string): Promise<string | null> {
+  return parseBoardName(await fetchBoardHtml(env, board));
+}
+
+export function parseBoardName(html: string): string | null {
+  return html.match(/class="board" href="\/bbs\/([^/"]+)\/index\.html"/)?.[1] ?? null;
 }
 
 export function parseBoardIndex(baseUrl: string, board: string, html: string): ScrapedArticle[] {

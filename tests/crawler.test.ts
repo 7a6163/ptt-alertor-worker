@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { parseBoardIndex } from '../src/crawler/ptt';
+import { parseBoardIndex, parseBoardName } from '../src/crawler/ptt';
 
 const BASE = 'https://www.ptt.cc';
 
@@ -77,5 +77,18 @@ describe('parseBoardIndex', () => {
     const payload = warn.mock.calls[0]?.[1] as { missed: number; deleted: number };
     expect(payload.missed).toBe(1);
     expect(payload.deleted).toBe(0);
+  });
+});
+
+describe('parseBoardName', () => {
+  it('reads the canonical spelling from the topbar link', () => {
+    const html =
+      '<div id="topbar"><a class="board" href="/bbs/Stock/index.html">' +
+      '<span class="board-label">看板 </span>Stock</a></div>';
+    expect(parseBoardName(html)).toBe('Stock');
+  });
+
+  it('returns null when the link is missing', () => {
+    expect(parseBoardName('<div class="r-ent"></div>')).toBeNull();
   });
 });
