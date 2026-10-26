@@ -44,11 +44,11 @@ Admin (basic auth, base64 in ADMIN_BASIC_AUTH)
 ## Setup
 
 ```
-pnpm install   # or npm install / yarn
+npm install
 
-pnpm db:create                   # paste returned id into wrangler.toml
-pnpm db:migrate:local            # for local wrangler dev
-pnpm db:migrate:remote           # for production
+npm run db:create            # paste returned id into wrangler.toml
+npm run db:migrate:local     # for local wrangler dev
+npm run db:migrate:remote    # for production
 
 wrangler queues create ptt-article-events
 wrangler queues create ptt-dispatch
@@ -58,8 +58,8 @@ wrangler secret put TELEGRAM_BOT_TOKEN
 wrangler secret put TELEGRAM_WEBHOOK_SECRET
 wrangler secret put ADMIN_BASIC_AUTH    # echo -n "user:pass" | base64
 
-pnpm dev
-pnpm deploy
+npm run dev
+npm run deploy
 ```
 
 ## Telegram
@@ -110,9 +110,12 @@ The original Chinese free-text grammar still works (`新增 Stock 關鍵字 台�
 ## Tests
 
 ```
-pnpm test
-pnpm typecheck
+npm test
+npm run typecheck
+npm run lint        # oxlint, warnings fail
 ```
+
+CI (`.github/workflows/ci.yml`) runs the same three on every push and pull request.
 
 ## Caveats
 

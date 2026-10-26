@@ -9,17 +9,18 @@ Cloudflare Workers rewrite of the Go project ptt-alertor: crawls PTT boards ever
 ## Commands
 
 ```
-pnpm install
-pnpm dev                 # wrangler dev (needs pnpm db:migrate:local first)
-pnpm test                # vitest run — all tests
-pnpm vitest run tests/parser.test.ts        # one file
-pnpm vitest run -t "parses help variants"   # one test by name
-pnpm typecheck           # tsc --noEmit (strict + noUncheckedIndexedAccess)
-pnpm deploy
-pnpm db:migrate:local | pnpm db:migrate:remote   # apply migrations/*.sql to D1
+npm install
+npm run dev              # wrangler dev (needs npm run db:migrate:local first)
+npm test                 # vitest run — all tests
+npx vitest run tests/parser.test.ts         # one file
+npx vitest run -t "parses help variants"    # one test by name
+npm run typecheck        # tsc --noEmit (strict + noUncheckedIndexedAccess)
+npm run lint             # oxlint, zero-config correctness rules; warnings fail the run
+npm run deploy
+npm run db:migrate:local | npm run db:migrate:remote   # apply migrations/*.sql to D1
 ```
 
-The lockfile is `pnpm-lock.yaml`; if `pnpm` is not on PATH, `npx pnpm <cmd>` or `corepack pnpm <cmd>` works. There is no linter. Tests are pure unit tests (parser, crawler HTML parsing, keyword matching) with no D1/queue bindings; code that touches `env.DB` or queues is untested.
+CI (`.github/workflows/ci.yml`) runs lint, typecheck and test on every push and PR. Tests are pure unit tests (parser, crawler HTML parsing, keyword matching) with no D1/queue bindings; code that touches `env.DB` or queues is untested.
 
 Secrets live in `.dev.vars` locally and `wrangler secret put` in prod; the list is commented at the bottom of `wrangler.toml`. `TELEGRAM_WEBHOOK_SECRET` is fail-closed: the webhook returns 503 if unset.
 
