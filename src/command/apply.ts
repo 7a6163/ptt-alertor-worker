@@ -1,11 +1,10 @@
 import type { Env, Channel } from '../env';
 import type { Command } from './parser';
 import { MAX_ITEMS_PER_COMMAND } from './parser';
+import { fetchBoardIndex } from '../crawler/ptt';
 
-// PTT board names are ASCII; anything else (a stray `/add`, Chinese text) would
-// become a boards row the checker fetches every minute forever.
-// shortcut: case and existence are not checked, so `stock` silently never
-// matches; verify against PTT when junk boards show up in /admin/boards.
+// PTT board names are ASCII; anything else (a stray `/add`, Chinese text) is
+// rejected before we even ask PTT whether the board exists.
 const BOARD_NAME_RE = /^[A-Za-z0-9_-]{1,30}$/;
 const BAD_BOARD_MSG = '板名格式不正確（英數、底線、連字號）。';
 
@@ -43,7 +42,7 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
     case 'subscribe_keyword':
       if (cmd.items.length === 0) return '沒有可訂閱的關鍵字。';
       if (!BOARD_NAME_RE.test(cmd.board)) return BAD_BOARD_MSG;
-      await ensureBoard(env, cmd.board);
+      if (!(await ensureBoard(env, cmd.board))) return missingBoardMsg(cmd.board);
       await env.DB.batch(
         cmd.items.map((k) =>
           env.DB.prepare(
@@ -66,7 +65,7 @@ export async function applyCommand(env: Env, userId: string, cmd: Command): Prom
     case 'subscribe_author':
       if (cmd.items.length === 0) return '沒有可訂閱的作者。';
       if (!BOARD_NAME_RE.test(cmd.board)) return BAD_BOARD_MSG;
-      await ensureBoard(env, cmd.board);
+      if (!(await ensureBoard(env, cmd.board))) return missingBoardMsg(cmd.board);
       await env.DB.batch(
         cmd.items.map((a) =>
           env.DB.prepare(
@@ -149,11 +148,28 @@ function truncationNote(truncated: boolean | undefined): string {
   return truncated ? `（已忽略超過 ${MAX_ITEMS_PER_COMMAND} 個的部分）` : '';
 }
 
-async function ensureBoard(env: Env, name: string): Promise<void> {
+function missingBoardMsg(board: string): string {
+  return `找不到看板 ${board}（板名有分大小寫，請確認後再試）。`;
+}
+
+// Returns false when the board is unknown to us AND PTT doesn't serve it, so
+// a typo (or wrong case — PTT paths are case-sensitive) never becomes a boards
+// row the checker fetches every minute. A PTT hiccup also reads as "missing";
+// the user just retries.
+async function ensureBoard(env: Env, name: string): Promise<boolean> {
+  const known = await env.DB.prepare(`SELECT 1 FROM boards WHERE name = ?`).bind(name).first();
+  if (known) return true;
+  try {
+    await fetchBoardIndex(env, name);
+  } catch (err) {
+    console.warn('ensureBoard: board rejected', { name, err: String(err) });
+    return false;
+  }
   await env.DB.prepare(
     `INSERT INTO boards (name, last_checked_at) VALUES (?, 0)
      ON CONFLICT(name) DO NOTHING`,
   ).bind(name).run();
+  return true;
 }
 
 export async function formatList(env: Env, userId: string): Promise<string> {
